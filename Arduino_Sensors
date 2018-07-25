@@ -1,0 +1,150 @@
+#include <OneWire.h>
+#include <LiquidCrystal.h>
+#include <Ticks.h>
+
+LiquidCrystal lcd(13, 12, 11, 10, 9, 8); // Display initialization
+unsigned int count=0;
+
+OneWire  ds(5); // pin for temperature sensor
+const byte pinFlowMeter = 2;    // pin for flowmeter sensor
+const byte numInterrupt = 0;    // number of interruption
+const int period = 10000; // reading data period
+const float CoefLitMin = 0.0074; // conversion factor for flowmeter
+float val;
+float val2;
+float val3;
+
+Ticks myTicks(numInterrupt, pinFlowMeter, period); //class for reading data form flowmeter
+int x = 0;
+int row = 0;
+  byte type_s;
+
+void setup() // setup function, works only once right after microcontroller starting
+  
+{
+  Serial.begin(19200);
+  lcd.begin(16, 2); 
+ lcd.clear(); //
+ myTicks.begin();  // Sending signal to start count flowmeter ticks
+ digitalWrite(pinFlowMeter, HIGH); // 
+pinMode(A0, INPUT);
+analogReference(DEFAULT);
+
+// Setting up connection with macros on PC
+ Serial.println("CLEARDATA"); //очищает люьую информацию в листе Exel оставшуюся с прошлых проектов
+
+  Serial.println("LABEL,Time,celsius,Q,Pressure"); //always write LABEL, so excel knows the next things will be the names of the columns (instead of Acolumn you could write Time for instance)
+
+// Pressure sensor calibration
+val = analogRead(A0); // reading minimum reference point
+ lcd.setCursor(2, 0); 
+ lcd.print("ESTIMATE PRESS");
+ lcd.setCursor(0,1);
+ lcd.print("HIGHER THAN 16BAR");
+delay(20000);
+val2 = analogRead(A0); // reading maximum reference point
+delay(100);
+val3 = (val2 - val)/16; // range definition
+}
+// Declaration of data types and constants for further calculation of data from the sensor into pressure parameters
+float Pressure;
+float offset = 0.088;
+float atm = 101325;
+float analogS = 0;
+float P = 0;
+float P2 = 0;
+float P1 = 0;
+
+void loop() { // Main function
+
+myTicks.operate();       // flow meter ticks counting
+  byte i;
+  byte present = 0;
+  byte type_s;
+  byte data[12];
+  byte addr[8];
+  float celsius, fahrenheit, Q; 
+
+  //Part for setting up temperature sensor
+  
+  if ( !ds.search(addr)) {
+    ds.reset_search();
+    return;
+  }
+  
+  for( i = 0; i < 8; i++) {
+    Serial.write(' ');
+  }
+
+  if (OneWire::crc8(addr, 7) != addr[7]) {
+      Serial.println("CRC is not valid!");
+      return;
+  }
+  Serial.println();
+ 
+  ds.reset();
+  ds.select(addr);
+  ds.write(0x44);        // Start converting for spurious power  
+  delay(750);    
+  present = ds.reset();
+  ds.select(addr);    
+  ds.write(0xBE);         // Read Scratchpad
+
+
+  for ( i = 0; i < 9; i++) {       data[i] = ds.read();
+
+  }
+
+
+ // convertion data from hexadecimal notation
+
+  int16_t raw = (data[1] << 8) | data[0];
+  if (type_s) {
+    raw = raw << 3; // 9 bit resolution default
+    if (data[7] == 0x10) {
+      // "count remain" gives full 12 bit resolution
+      raw = (raw & 0xFFF0) + 12 - data[6];
+    }
+  } else {
+    byte cfg = (data[4] & 0x60);
+    // at lower res, the low bits are undefined, so let's zero them
+    if (cfg == 0x00) raw = raw & ~7;  // 9 bit resolution, 93.75 ms
+    else if (cfg == 0x20) raw = raw & ~3; // 10 bit res, 187.5 ms
+    else if (cfg == 0x40) raw = raw & ~1; // 11 bit res, 375 ms
+  }
+  celsius = (float)raw / 16.0;
+  Q = myTicks.TickRate1Period()/CoefLitMin, 2;
+
+//Setting up buffers for pressure sensor
+char valadc[20] = "0";
+char presadc[20] = "0";
+char pesoadc[20] = "0";
+char pres[20] = "0";
+
+ dtostrf(val, 20, 0, valadc);
+
+ P = analogRead(analogS)- val; // Calculating the difference between the data with the current indicators
+ 
+  Pressure = P/val3; // Calculation of pressure, unit of measure - atm. 
+  
+ Serial.println(val, DEC);
+ // print info on LCD
+ lcd.clear();
+ lcd.setCursor(2, 0);
+  lcd.print(" Q=");
+ lcd.print(myTicks.TickRate1Period()/CoefLitMin, 2);
+lcd.print("P="); 
+ lcd.print(Pressure);
+ lcd.setCursor(0,1);
+ lcd.print("T=");
+ lcd.print(celsius);
+ lcd.print("C.");
+ // Block of commands to send data to Exel
+Serial.print("DATA,TIME,");
+Serial.print(celsius);
+Serial.print(",");
+Serial.print(Q);
+Serial.print(",");
+Serial.print(Pressure);
+ delay (100);
+}
